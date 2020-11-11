@@ -23,7 +23,7 @@ function cooldown_preview_ability:OnSpellStart()
 	local caster = self:GetCaster()
 
 	self:RegisterClientFunctions() -- needs to be called in order for GetClientCooldown() to work properly
-	self.ability:SetClientCooldown() -- if called with no arguments, it sets it as cooldown * cdr; otherwise the custom cooldown
+	self:SetClientCooldown() -- if called with no arguments, it sets it as cooldown * cdr; otherwise the custom cooldown
 
 	caster:AddNewModifier(caster, self, "modifier_cd_test", {Duration = 8})
 end
