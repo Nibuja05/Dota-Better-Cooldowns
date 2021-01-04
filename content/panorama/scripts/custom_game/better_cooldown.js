@@ -1,132 +1,161 @@
-var base = $.GetContextPanel().GetParent().GetParent().GetParent();
-var x = base.FindChildTraverse('HUDElements');
+const basePanel = $.GetContextPanel().GetParent().GetParent().GetParent();
+let x = basePanel.FindChildTraverse('HUDElements');
 x = x.FindChildTraverse('lower_hud');
 x = x.FindChildTraverse('center_with_stats');
 x = x.FindChildTraverse('center_block');
 x = x.FindChildTraverse('AbilitiesAndStatBranch');
-var abilities = x.FindChildTraverse('abilities');
+const abilities = x.FindChildTraverse('abilities');
 
-checkSchedule = false;
-abilityState = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
-lastCooldownTimes = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-frame = 0;
-lastSelected = false;
+var abilityState = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+var abilityData = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined];
+var lastSelected = undefined;
 
+//Check if selected units ability goes on cooldown
+$.RegisterForUnhandledEvent("StyleClassesChanged", (panel) => { 
+	if (panel === null) return;
+	const abilityIndex = GetAbilityIndexFromPanel(panel);
+	if (abilityIndex >= 0) {
+		if (abilityState[abilityIndex] > 0) {
+			return;
+		}
+		const abilityPanel = FindAbilityPanelByIndex(abilityIndex);
+		if (abilityPanel) {
+			const abilityImage = abilityPanel.FindChildTraverse("AbilityImage")
+			const abilityID = abilityImage.contextEntityIndex;
+			const cooldownPanel = abilityPanel.FindChild("Cooldown");
+			const cooldown = Abilities.GetCooldownTimeRemaining(abilityID);
+			if (cooldown > 0) {
+				abilityState[abilityIndex] = 1;
+				abilityData[abilityIndex] = [abilityID, cooldownPanel, cooldown, Abilities.GetCooldownLength(abilityID)];
+				OverwriteOverlay(abilityIndex);
+			}
+		}
+	}
+});
+
+//Get the ability index (not ability id), if the panel is an ability panel and on cooldown
+function GetAbilityIndexFromPanel(panel) {
+	if (panel.paneltype === "DOTAAbilityPanel" && panel.BHasClass("in_cooldown")) {
+		const parent = panel.GetParent();
+		if (parent !== undefined && parent.id === "abilities") {
+			return parseInt(panel.id.slice(-1), 10);
+		}
+	}
+	return -1;
+}
+
+//Checks if selected unit has changed and checks for abilities on cooldown
 function CheckAbilities() {
-	var mainSelected = Players.GetLocalPlayerPortraitUnit();
+	const mainSelected = Players.GetLocalPlayerPortraitUnit();
+	let reCheck = false;
 	if (mainSelected !== lastSelected) {
-		abilityState = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2];
-		frame = 0;
+		abilityState = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+		abilityData = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined];
+		reCheck = true;
 	}
 	lastSelected = mainSelected;
 
-	var undef = false;
-	var idle = false;
-	if (frame % 180 == 0) {
-		undef = true;
-		frame = 0;
-	}
-	if (frame % 10 == 0) {
-		idle = true;
-	}
-	var actualIndex = 0;
-	abilityState.forEach(function (item, index) {
-		var ability = Entities.GetAbility(mainSelected, actualIndex);
-		var hidden = Abilities.IsHidden(ability)
-		while(hidden && index <= 9) {
-			actualIndex++;
-			var ability = Entities.GetAbility(mainSelected, actualIndex);
-			var hidden = Abilities.IsHidden(ability)
+	if (reCheck) {
+		for (let i = 0; i < 10; i++) {
+			const abilityPanel = FindAbilityPanelByIndex(i);
+			if (abilityPanel) {
+				const abilityImage = abilityPanel.FindChildTraverse("AbilityImage")
+				const abilityID = abilityImage.contextEntityIndex;
+				const cooldownPanel = abilityPanel.FindChildTraverse("Cooldown");
+				const cooldown = Abilities.GetCooldownTimeRemaining(abilityID);
+				if (cooldown && cooldown > 0) {
+					abilityState[i] = 1;
+					abilityData[i] = [abilityID, cooldownPanel, cooldown, Abilities.GetCooldownLength(abilityID)];
+					OverwriteOverlay(i);
+				}
+			}
 		}
-		if (item == 2 && undef) {
-			OverwriteOverlay(index, actualIndex);
-		} else if (item == 1 && idle) {
-			OverwriteOverlay(index, actualIndex);
-		} else if (item == 0) {
-			OverwriteOverlay(index, actualIndex);
+	} else if (abilityState.includes(1)) {
+		for (let i = 0; i < 10; i++) {
+			if (abilityState[i] == 1) {
+				OverwriteOverlay(i);
+			}
 		}
-		actualIndex++;
-	});
-	checkSchedule = $.Schedule(1 / 60, CheckAbilities);
-	frame++;
+	}
+	$.Schedule(1/60, CheckAbilities)
 }
 
-function OverwriteOverlay(abilityID, actualID) {
-	var cooldown = FindCooldownPanel(abilityID);
-	if (cooldown) {
-		var percentage = GetCDPercentage(actualID, abilityID);
-		if (abilityState[abilityID] > 1) {
-			abilityState[abilityID] = 1;
+//Find the ability panel for this index
+function FindAbilityPanelByIndex(index) {
+	const abilityPanel = abilities.FindChild("Ability" + index);
+	if (abilityPanel === null) {return false;}
+	const abilityButtonAndLevel = abilityPanel.FindChild("ButtonAndLevel");
+	const abilityLevelUpTab = abilityButtonAndLevel.FindChild("ButtonWithLevelUpTab");
+	const abilityButtonWell = abilityLevelUpTab.FindChild("ButtonWell");
+	const abilityButtonSize = abilityButtonWell.FindChild("ButtonSize");
+	return abilityButtonSize.FindChild("AbilityButton");
+}
+
+//Called multiple times a second; updates the cooldown visualizer
+function OverwriteOverlay(index) {
+	const data = abilityData[index];
+	let percentage = GetCDPercentage(index);
+	if (percentage) {
+		const overlay = ReplaceOverlay(data[1]);
+		if (percentage > 1) {
+			percentage = 1;
 		}
-		if (percentage) {
-			if (abilityState[abilityID] > 0) {
-				abilityState[abilityID] = 0;
-			}
-			var overlay = ReplaceOverlay(cooldown);
-			if (percentage > 1) {
-				percentage = 1;
-			}
-			var degrees = -360 * percentage;
-			overlay.style.clip = "radial( 50.0% 50.0%, 0.0deg, " + degrees + "deg)"
-		} else {
-			if (abilityState[abilityID] == 0) {
-				abilityState[abilityID] = 1;
-				UndoOverlay(cooldown);
-			}
+		const degrees = -360 * percentage;
+		overlay.style.clip = "radial( 50.0% 50.0%, 0.0deg, " + degrees + "deg)"
+	} else {
+		if (abilityState[index] == 1) {
+			abilityState[index] = 0;
+			abilityData[index] = undefined;
 		}
 	}
 }
 
-function GetCDPercentage(abilityID, index) {
-	var mainSelected = Players.GetLocalPlayerPortraitUnit();
-	var ability = Entities.GetAbility(mainSelected, abilityID);
-	if (ability !== undefined) {
-		var maxCD = Abilities.GetCooldown(ability);
-		if (maxCD == 0) {
+//Calculated the current fill percentage
+function GetCDPercentage(index) {
+	const mainSelected = Players.GetLocalPlayerPortraitUnit();
+	let data = abilityData[index];
+	if (data[0] !== undefined) {
+		let maxCD = Abilities.GetCooldown(data[0]) * GetCooldownReduction(mainSelected);
+		if (maxCD === 0) {
 			return false;
 		}
-		var curCD = Abilities.GetCooldownTimeRemaining(ability);
-		if (curCD > lastCooldownTimes[index]) {
-			let inc = curCD - lastCooldownTimes[index];
+		let curCD = Abilities.GetCooldownTimeRemaining(data[0]);
+		if (curCD > maxCD) {
+			maxCD = data[3];
+		}
+		if (curCD > data[2]) {
+			let inc = curCD - data[2];
 			if (inc < (maxCD / 15)) {
-				var ratio = lastCooldownTimes[index] / maxCD;
+				let ratio = data[2] / maxCD;
 				return ratio;
 			}
 		}
-		lastCooldownTimes[index] = curCD
-		if (curCD == 0) {
+		abilityData[index][2] = curCD
+		if (curCD === 0) {
 			return 0;
 		}
-		var ratio = curCD / maxCD;
+		let ratio = curCD / maxCD;
 		return ratio;
 	}
 	return false;
 }
 
-function FindCooldownPanel(abilityID) {
-	var abilityName = "Ability" + abilityID
-	var ability = abilities.FindChildTraverse(abilityName);
-	if (ability == undefined) {return false;}
-	var cooldown = ability.FindChildTraverse("Cooldown");
-	return cooldown;
-}
-
+//Adds the custom cooldown overlay and hides the default one
 function ReplaceOverlay(cdPanel) {
-	var overlay = cdPanel.FindChildTraverse("CooldownOverlay");
+	let overlay = cdPanel.FindChildTraverse("CooldownOverlay");
 	if (overlay) {
 		overlay.style.opacity = "0";
 	}
-	var newOverlay = cdPanel.FindChildTraverse("NewCooldownOverlay");
-	if (newOverlay == undefined || !newOverlay) {
-		$.Msg("New Overlay!");
+	let newOverlay = cdPanel.FindChildTraverse("NewCooldownOverlay");
+	if (newOverlay === undefined || !newOverlay) {
 		newOverlay = $.CreatePanel("Panel", $.GetContextPanel(), "NewCooldownOverlay");
 		newOverlay.SetParent(cdPanel);
 		newOverlay.style.width = "100%";
 		newOverlay.style.height = "100%";
 		newOverlay.style.backgroundColor = "#000000dc";
 
-		var child1 = cdPanel.GetChild(1);
-		var child2 = cdPanel.GetChild(2);
+		let child1 = cdPanel.GetChild(1);
+		let child2 = cdPanel.GetChild(2);
 		cdPanel.MoveChildAfter(child1, child2);
 	} else {
 		newOverlay.style.opacity = "1";
@@ -134,15 +163,14 @@ function ReplaceOverlay(cdPanel) {
 	return newOverlay;
 }
 
-function UndoOverlay(cdPanel) {
-	var overlay = cdPanel.FindChildTraverse("CooldownOverlay");
-	if (overlay) {
-		overlay.style.opacity = "1";
+//Receives the cdr from custom nettable entries
+function GetCooldownReduction(unitID) {
+	let table = CustomNetTables.GetTableValue("better_cooldowns_cdr", unitID.toString())
+	if (table) {
+		return parseFloat(table["cdr"]);
 	}
-	var newOverlay = cdPanel.FindChildTraverse("NewCooldownOverlay");
-	if (newOverlay) {
-		newOverlay.style.opacity = "0";
-	}
+	return 1;
 }
 
-CheckAbilities()
+//Start the checker
+CheckAbilities();
