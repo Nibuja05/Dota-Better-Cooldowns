@@ -19,3 +19,9 @@ Optional:
 - You might want to lookup `cooldown_preview_ability.lua` for an example lua ability that uses the new functions:
 
 - `CDOTABaseAbility:SetFrozenCooldown(state)` - freezes or unfreezes the cooldown of an ability
+
+- `CDOTABaseAbility:SetCooldownSpeed(speed)` - changes the tickspeed of the cooldown of this ability. To reset, use the default value of speed = 1. Negative values are possible.
+
+### Note
+
+You can adjust `MAX_CONSECUTIV` in `better_cooldown.js` if you experience some value flickering on you cooldowns.

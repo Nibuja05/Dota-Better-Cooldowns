@@ -6,6 +6,9 @@ x = x.FindChildTraverse('center_block');
 x = x.FindChildTraverse('AbilitiesAndStatBranch');
 const abilities = x.FindChildTraverse('abilities');
 
+//Set this higher if the "wiggle is too much"
+var MAX_CONSECUTIV = 6;
+
 var abilityState = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 var abilityData = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined];
 var lastSelected = undefined;
@@ -20,13 +23,14 @@ $.RegisterForUnhandledEvent("StyleClassesChanged", (panel) => {
 		}
 		const abilityPanel = FindAbilityPanelByIndex(abilityIndex);
 		if (abilityPanel) {
+			$.Msg("Ability activated!");
 			const abilityImage = abilityPanel.FindChildTraverse("AbilityImage")
 			const abilityID = abilityImage.contextEntityIndex;
 			const cooldownPanel = abilityPanel.FindChild("Cooldown");
 			const cooldown = Abilities.GetCooldownTimeRemaining(abilityID);
 			if (cooldown > 0) {
 				abilityState[abilityIndex] = 1;
-				abilityData[abilityIndex] = [abilityID, cooldownPanel, cooldown, Abilities.GetCooldownLength(abilityID)];
+				abilityData[abilityIndex] = [abilityID, cooldownPanel, cooldown, Abilities.GetCooldownLength(abilityID), 0];
 				OverwriteOverlay(abilityIndex);
 			}
 		}
@@ -65,7 +69,7 @@ function CheckAbilities() {
 				const cooldown = Abilities.GetCooldownTimeRemaining(abilityID);
 				if (cooldown && cooldown > 0) {
 					abilityState[i] = 1;
-					abilityData[i] = [abilityID, cooldownPanel, cooldown, Abilities.GetCooldownLength(abilityID)];
+					abilityData[i] = [abilityID, cooldownPanel, cooldown, Abilities.GetCooldownLength(abilityID), 0];
 					OverwriteOverlay(i);
 				}
 			}
@@ -94,14 +98,18 @@ function FindAbilityPanelByIndex(index) {
 //Called multiple times a second; updates the cooldown visualizer
 function OverwriteOverlay(index) {
 	const data = abilityData[index];
-	let percentage = GetCDPercentage(index);
-	if (percentage) {
+	let cooldowns = GetCooldowns(index);
+	if (cooldowns) {
+		const percentage = cooldowns[0];
+		const currentCD = cooldowns[1];
 		const overlay = ReplaceOverlay(data[1]);
+		const timer = ReplaceTimer(data[1]);
 		if (percentage > 1) {
 			percentage = 1;
 		}
 		const degrees = -360 * percentage;
-		overlay.style.clip = "radial( 50.0% 50.0%, 0.0deg, " + degrees + "deg)"
+		overlay.style.clip = "radial( 50.0% 50.0%, 0.0deg, " + degrees + "deg)";
+		timer.text = Math.ceil(currentCD);
 	} else {
 		if (abilityState[index] == 1) {
 			abilityState[index] = 0;
@@ -111,7 +119,7 @@ function OverwriteOverlay(index) {
 }
 
 //Calculated the current fill percentage
-function GetCDPercentage(index) {
+function GetCooldowns(index) {
 	const mainSelected = Players.GetLocalPlayerPortraitUnit();
 	let data = abilityData[index];
 	if (data[0] !== undefined) {
@@ -123,19 +131,22 @@ function GetCDPercentage(index) {
 		if (curCD > maxCD) {
 			maxCD = data[3];
 		}
+		let consecutiv = data[4];
 		if (curCD > data[2]) {
-			let inc = curCD - data[2];
-			if (inc < (maxCD / 15)) {
+			abilityData[index][4] = consecutiv + 1;
+			if (consecutiv <= MAX_CONSECUTIV - 1) {
 				let ratio = data[2] / maxCD;
-				return ratio;
+				return [ratio, data[2]];
 			}
+		} else if (consecutiv < MAX_CONSECUTIV) {
+			abilityData[index][4] = 0;
 		}
 		abilityData[index][2] = curCD
 		if (curCD === 0) {
-			return 0;
+			return [0, 0];
 		}
 		let ratio = curCD / maxCD;
-		return ratio;
+		return [ratio, curCD];
 	}
 	return false;
 }
@@ -153,6 +164,7 @@ function ReplaceOverlay(cdPanel) {
 		newOverlay.style.width = "100%";
 		newOverlay.style.height = "100%";
 		newOverlay.style.backgroundColor = "#000000dc";
+		newOverlay.hittest = false;
 
 		let child1 = cdPanel.GetChild(1);
 		let child2 = cdPanel.GetChild(2);
@@ -161,6 +173,34 @@ function ReplaceOverlay(cdPanel) {
 		newOverlay.style.opacity = "1";
 	}
 	return newOverlay;
+}
+
+//Adds the custom cooldown timer and hides the default one
+function ReplaceTimer(cdPanel) {
+	let timer = cdPanel.FindChildTraverse("CooldownTimer");
+	if (timer) {
+		timer.style.opacity = "0";
+	}
+	let newTimer = cdPanel.FindChildTraverse("NewCooldownTimer");
+	if (newTimer === undefined || !newTimer) {
+		newTimer = $.CreatePanel("Label", $.GetContextPanel(), "NewCooldownTimer");
+		newTimer.SetParent(cdPanel);
+		newTimer.AddClass("MonoNumbersFont")
+		newTimer.style.width = "100%";
+		newTimer.style.color = "white";
+		newTimer.style.fontSize = "28px";
+		newTimer.style.textShadow = "0px 0px 6px 6 #000000";
+		newTimer.style.textAlign = "center";
+		newTimer.style.verticalAlign = "center";
+		newTimer.style.textOverflow = "shrink";
+		newTimer.hittest = false;
+
+		newTimer.text = timer.text;
+
+	} else {
+		newTimer.style.opacity = "1";
+	}
+	return newTimer;
 }
 
 //Receives the cdr from custom nettable entries

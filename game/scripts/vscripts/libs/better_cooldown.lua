@@ -1,4 +1,5 @@
-LinkLuaModifier("modifier_frozen_cooldown", "libs/better_cooldown.lua", LUA_MODIFIER_MOTION_NONE)
+LinkLuaModifier("modifier_bc_frozen_cooldown", "libs/better_cooldown.lua", LUA_MODIFIER_MOTION_NONE)
+LinkLuaModifier("modifier_bc_cooldown_speed", "libs/better_cooldown.lua", LUA_MODIFIER_MOTION_NONE)
 
 if not BetterCooldowns then 
 	BetterCooldowns = class({})
@@ -26,38 +27,61 @@ function BetterCooldowns:OnAbilityCast(event)
 	end
 end
 
-function CDOTABaseAbility:SetFrozenCooldown(state)
-	local caster = self:GetCaster()
-	local entIndex = self:entindex()
-	for _,modifier in pairs(caster:FindAllModifiersByName("modifier_frozen_cooldown")) do
-		if modifier.entindex == entIndex then
-			modifier:Destroy()
+if IsServer() then
+	function CDOTABaseAbility:SetFrozenCooldown(state)
+		local caster = self:GetCaster()
+		local entIndex = self:entindex()
+		for _,modifier in pairs(caster:FindAllModifiersByName("modifier_bc_frozen_cooldown")) do
+			if modifier.entindex == entIndex then
+				modifier:Destroy()
+			end
+		end
+		if state == true then
+			caster:AddNewModifier(caster, self, "modifier_bc_frozen_cooldown", {Entindex = entIndex})
 		end
 	end
-	if state == true then
-		caster:AddNewModifier(caster, self, "modifier_frozen_cooldown", {Entindex = entIndex})
+
+	function CDOTABaseAbility:SetCooldownSpeed(speed)
+		local caster = self:GetCaster()
+		local entIndex = self:entindex()
+		for _,modifier in pairs(caster:FindAllModifiersByName("modifier_bc_cooldown_speed")) do
+			if modifier.entindex == entIndex then
+				if speed == 1 then
+					modifier:Destroy()
+				else
+					modifier.speed = speed
+				end
+			end
+		end
+		if speed ~= 1 then
+			caster:AddNewModifier(caster, self, "modifier_bc_cooldown_speed", {Entindex = entIndex, speed=speed})
+		end
 	end
 end
 
-modifier_frozen_cooldown = class({})
+modifier_bc_frozen_cooldown = class({})
 
-function modifier_frozen_cooldown:IsHidden()
+function modifier_bc_frozen_cooldown:IsHidden()
 	return true
 end
 
-function modifier_frozen_cooldown:IsDebuff()
+function modifier_bc_frozen_cooldown:IsDebuff()
 	return true
 end
 
-function modifier_frozen_cooldown:IsPurgable()
+function modifier_bc_frozen_cooldown:IsPurgable()
 	return false
 end
 
-function modifier_frozen_cooldown:RemoveOnDeath()
+function modifier_bc_frozen_cooldown:RemoveOnDeath()
 	return false
 end
 
-function modifier_frozen_cooldown:OnCreated(event)
+function modifier_bc_frozen_cooldown:GetAttributes()
+	return MODIFIER_ATTRIBUTE_MULTIPLE
+end
+
+function modifier_bc_frozen_cooldown:OnCreated(event)
 	if IsClient() then return end
 	self.entindex = event.Entindex
 	self.ability = EntIndexToHScript(self.entindex)
@@ -65,7 +89,50 @@ function modifier_frozen_cooldown:OnCreated(event)
 	self:StartIntervalThink(1/120)
 end
 
-function modifier_frozen_cooldown:OnIntervalThink()
+function modifier_bc_frozen_cooldown:OnIntervalThink()
 	self.ability:StartCooldown(self.cooldown)
+end
+
+modifier_bc_cooldown_speed = class({})
+
+function modifier_bc_cooldown_speed:IsHidden()
+	return true
+end
+
+function modifier_bc_cooldown_speed:IsDebuff()
+	return true
+end
+
+function modifier_bc_cooldown_speed:IsPurgable()
+	return false
+end
+
+function modifier_bc_cooldown_speed:RemoveOnDeath()
+	return false
+end
+
+function modifier_bc_cooldown_speed:GetAttributes()
+	return MODIFIER_ATTRIBUTE_MULTIPLE
+end
+
+function modifier_bc_cooldown_speed:OnCreated(event)
+	if IsClient() then return end
+	self.entindex = event.Entindex
+	self.ability = EntIndexToHScript(self.entindex)
+	self.lastCooldown = self.ability:GetCooldownTimeRemaining()
+	self.gameTime = GameRules:GetGameTime()
+	self.speed = event.speed
+	self.tickSpeed = 1/120
+	self:StartIntervalThink(self.tickSpeed)
+end
+
+function modifier_bc_cooldown_speed:OnIntervalThink()
+	local gameTime = GameRules:GetGameTime()
+	local diff = gameTime - self.gameTime
+	self.gameTime = gameTime
+	local newCooldown = self.lastCooldown - diff * self.speed
+	self.lastCooldown = newCooldown
+	self.ability:EndCooldown()
+	self.ability:StartCooldown(newCooldown)
 end
 
